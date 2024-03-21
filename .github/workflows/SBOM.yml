@@ -1,0 +1,55 @@
+on:
+  pull_request:
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: install dependencies first
+        run: |
+            if [ -s requirements.txt ]
+            then
+              pip install -r requirements.txt
+            fi
+      - name: install python SBOM tool
+        run: pip install pip-audit cyclonedx-bom
+      - name: generate SBOM
+        run: cyclonedx-py requirements > SBOM.json 
+      - name: Security SBOM file artifacts
+        uses: actions/upload-artifact@v1
+        with:
+          name: SBOM.json
+          path: SBOM.json
+      - name: check for Dependency vulnerabilities
+        run: pip-audit -f json -r requirements.txt --progress-spinner off -o vuls.json || true
+      - name: Parse result
+        id: depresult
+        run: |
+            if [ -s vuls.json ]
+            then
+              result=$(python -c "import json;print(json.dumps([{'name': pkg['name'], 'version': pkg['version']} for pkg in json.load(open('vuls.json'))['dependencies'] if len(pkg['vulns'])]))")
+              echo results_json=$result >> "$GITHUB_OUTPUT"
+            else
+              echo "results_json=[]" >> "$GITHUB_OUTPUT"
+            fi
+      - uses: buildingcash/json-to-markdown-table-action@v1
+        if: ${{ steps.depresult.outputs.results_json }} != '[]'
+        id: table
+        with:
+          json: ${{ steps.depresult.outputs.results_json }}
+      - name: Report result in comment
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.issues.createComment({
+                  issue_number: context.payload.pull_request?.number || context.payload.issue?.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: ` Vulnerable libraries results: 
+                  
+            ${{ steps.table.outputs.table }}`
+                })
+        
+      

@@ -1,0 +1,79 @@
+
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+# Bandit is a security linter designed to find common security issues in Python code.
+# This action will run Bandit on your codebase.
+# The results of the scan will be found under the Security tab of your repository.
+
+# https://github.com/marketplace/actions/bandit-scxan is ISC licensed, by abirismyname
+# https://pypi.org/project/bandit/ is Apache v2.0 licensed, by PyCQA
+
+name: Bandit
+on:
+  pull_request:
+
+
+jobs:
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Bandit
+        run: pip install bandit
+      - name: check result
+        id: bandit_result
+        run : |
+            bandit -q -f json -o bandit_results.json --exit-zero -r .
+            if [[ $(cat bandit_results.json | jq -e '.metrics._totals."SEVERITY.HIGH"') == 0 ]]
+            then
+              echo "results_found='no'" >> "$GITHUB_OUTPUT"
+            else
+              echo "results_found='yes'" >> "$GITHUB_OUTPUT"
+            fi
+      - name: check output
+        run: echo ${{steps.bandit_result.outputs.results_found}}
+      - name: Security Bandir report artifacts
+        uses: actions/upload-artifact@v1
+        with:
+          name: bandit report
+          path: bandit_results.json
+      - name: block if results found
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            if ( ${{steps.bandit_result.outputs.results_found}} === 'yes' )
+            {
+                await github.rest.issues.createComment({
+                  issue_number: context.payload.pull_request?.number || context.payload.issue?.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: 'Block'
+                })
+
+                await github.rest.pulls.update({
+                        pull_number: context.payload.pull_request?.number || context.payload.issue?.number,
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        state: 'closed'
+                })
+            }
+            if ( ${{steps.bandit_result.outputs.results_found}} === 'no' )
+            {
+                await github.rest.issues.createComment({
+                  issue_number: context.payload.pull_request?.number || context.payload.issue?.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: 'Success'
+                })
+                
+                await github.rest.pulls.merge({
+                        pull_number: context.payload.pull_request?.number || context.payload.issue?.number,
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                })
+            
+            }
