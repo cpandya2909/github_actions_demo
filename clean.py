@@ -1,1 +1,1 @@
-print('Clean code with no vulnerabilities here.')
+print('Clean code with no vulnerabilities here .')
